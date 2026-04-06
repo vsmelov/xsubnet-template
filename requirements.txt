@@ -1,3 +1,6 @@
+# Must stay aligned with btcli / docs: same major as your Subtensor stack (RPC + metadata).
+# Upstream template: https://github.com/opentensor/subnet-template/blob/main/requirements.txt
+bittensor>=10.0.1
 starlette>=0.30.0
 pydantic>=2
 rich>=13
