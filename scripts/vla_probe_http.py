@@ -1,9 +1,6 @@
 #!/usr/bin/env python3
 """
-HTTP-обёртка над run_math_probe: POST /v1/math-probe, GET /health.
-Запуск из корня /app в образе subnet-math:
-
-  PROBE_PORT=8091 NETUID=2 WALLET_NAME=math-val python scripts/subnet_probe_http.py
+POST /v1/vla-probe — см. REQUEST_TO_SUBNET_VLA.md в корневом репо xsubtensor.
 """
 
 from __future__ import annotations
@@ -21,7 +18,7 @@ _SCRIPTS = Path(__file__).resolve().parent
 sys.path.insert(0, str(_ROOT))
 sys.path.insert(0, str(_SCRIPTS))
 
-from subnet_probe_lib import run_math_probe  # noqa: E402
+from vla_probe_lib import run_vla_probe  # noqa: E402
 
 
 def _env_int(name: str, default: int) -> int:
@@ -40,17 +37,18 @@ def _env_float(name: str, default: float) -> float:
 
 DEFAULTS = {
     "netuid": lambda: _env_int("NETUID", 1),
-    "wallet_name": lambda: os.environ.get("WALLET_NAME", "math-val"),
+    "wallet_name": lambda: os.environ.get("WALLET_NAME", "vla-val"),
     "hotkey": lambda: os.environ.get("HOTKEY", "default"),
     "chain_endpoint": lambda: os.environ.get(
         "SUBTENSOR_CHAIN",
         "ws://127.0.0.1:9944",
     ),
     "sample_size": lambda: _env_int("PROBE_SAMPLE_SIZE", 4),
-    "operand_a": lambda: _env_int("PROBE_OPERAND_A", 6),
-    "operand_b": lambda: _env_int("PROBE_OPERAND_B", 7),
-    "op": lambda: os.environ.get("PROBE_OP", "*"),
-    "timeout": lambda: _env_float("PROBE_TIMEOUT", 30.0),
+    "task": lambda: os.environ.get(
+        "PROBE_TASK",
+        "Clean-up the guestroom",
+    ),
+    "timeout": lambda: _env_float("PROBE_TIMEOUT", 60.0),
 }
 
 
@@ -64,9 +62,7 @@ def _merge_body(body: dict | None) -> dict:
         b.get("chain_endpoint", DEFAULTS["chain_endpoint"]()),
     )
     out["sample_size"] = int(b.get("sample_size", DEFAULTS["sample_size"]()))
-    out["operand_a"] = int(b.get("operand_a", DEFAULTS["operand_a"]()))
-    out["operand_b"] = int(b.get("operand_b", DEFAULTS["operand_b"]()))
-    out["op"] = str(b.get("op", DEFAULTS["op"]()))
+    out["task"] = str(b.get("task", DEFAULTS["task"]()))
     out["timeout"] = float(b.get("timeout", DEFAULTS["timeout"]()))
     if "miner_uids" in b and b["miner_uids"] is not None:
         out["miner_uids"] = [int(x) for x in b["miner_uids"]]
@@ -77,19 +73,19 @@ def _merge_body(body: dict | None) -> dict:
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt: str, *args) -> None:
-        sys.stderr.write("%s - - [%s] %s\n" % (self.client_address[0], self.log_date_time_string(), fmt % args))
+        sys.stderr.write(
+            "%s - - [%s] %s\n"
+            % (self.client_address[0], self.log_date_time_string(), fmt % args)
+        )
 
     def _send_json(self, status: int, obj: object) -> None:
         try:
             raw = json.dumps(
-                obj,
-                ensure_ascii=False,
-                indent=2,
-                default=str,
+                obj, ensure_ascii=False, indent=2, default=str
             ).encode("utf-8")
         except Exception as e:
             raw = json.dumps(
-                {"ok": False, "error": f"json_encode: {e}", "type": type(e).__name__},
+                {"ok": False, "error": f"json_encode: {e}"},
                 ensure_ascii=False,
             ).encode("utf-8")
         self.send_response(status)
@@ -106,8 +102,8 @@ class Handler(BaseHTTPRequestHandler):
                 200,
                 {
                     "ok": True,
-                    "service": "subnet-math-probe",
-                    "routes": ["GET /health", "POST /v1/math-probe"],
+                    "service": "subnet-vla-probe",
+                    "routes": ["GET /health", "POST /v1/vla-probe"],
                 },
             )
             return
@@ -115,7 +111,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = self.path.split("?")[0].rstrip("/") or "/"
-        if path != "/v1/math-probe":
+        if path != "/v1/vla-probe":
             self.send_error(404)
             return
         try:
@@ -135,7 +131,7 @@ class Handler(BaseHTTPRequestHandler):
                 return
             kw = _merge_body(body)
             try:
-                result = asyncio.run(run_math_probe(**kw))
+                result = asyncio.run(run_vla_probe(**kw))
             except Exception as e:
                 traceback.print_exc(file=sys.stderr)
                 self._send_json(
@@ -150,11 +146,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 self._send_json(
                     500,
-                    {
-                        "ok": False,
-                        "error": str(e),
-                        "type": type(e).__name__,
-                    },
+                    {"ok": False, "error": str(e), "type": type(e).__name__},
                 )
             except Exception:
                 pass
@@ -163,7 +155,7 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     port = _env_int("PROBE_PORT", 8091)
     server = HTTPServer(("0.0.0.0", port), Handler)
-    print(f"subnet-math-probe listening on 0.0.0.0:{port}", flush=True)
+    print(f"subnet-vla-probe listening on 0.0.0.0:{port}", flush=True)
     server.serve_forever()
 
 

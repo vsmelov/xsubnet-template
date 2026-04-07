@@ -1,31 +1,21 @@
 """
-Один проход dendrite + MathSynapse по нескольким UID и те же reward-правила, что у template validator.
-Запуск из образа subnet-math (PYTHONPATH включает /app); версия SDK — см. requirements.txt (9.7.0).
+HTTP probe: dendrite + VLASynapse; rewards как у validator (почти равномерно + jitter).
 """
 
 from __future__ import annotations
 
-import operator
 import random
 import time
 from typing import Any, List, Optional
 
 import bittensor as bt
 
-from template.protocol import ALLOWED_OPS, MathSynapse
+from template.protocol import ALLOWED_TASKS, VLASynapse, is_allowed_task, normalize_task
 from template.validator.reward import get_rewards
-
-_OPS = {"+": operator.add, "-": operator.sub, "*": operator.mul}
 
 
 class _RewardLogCtx:
-    """Минимальный self для get_rewards (там нужен только bt.logging на warning)."""
-
-
-def _expected_value(operand_a: int, operand_b: int, op: str) -> float:
-    if op not in _OPS:
-        raise ValueError(f"op must be one of {list(_OPS)}")
-    return float(_OPS[op](operand_a, operand_b))
+    pass
 
 
 def _pick_miner_uids(
@@ -53,19 +43,14 @@ def _pick_miner_uids(
     return random.sample(candidates, k)
 
 
-def _extract_float_response(item: Any) -> Optional[float]:
+def _extract_url(item: Any) -> Optional[str]:
     if item is None:
         return None
-    if isinstance(item, (int, float)) and not isinstance(item, bool):
-        return float(item)
-    if hasattr(item, "result"):
-        r = getattr(item, "result")
-        if r is None:
-            return None
-        try:
-            return float(r)
-        except (TypeError, ValueError):
-            return None
+    if isinstance(item, str):
+        return item.strip() or None
+    if hasattr(item, "video_url"):
+        v = getattr(item, "video_url")
+        return str(v).strip() if v else None
     return None
 
 
@@ -76,11 +61,10 @@ def _dendrite_meta(synapse: Any) -> Any:
     meta: dict = {}
     for attr in ("status_code", "status_message", "process_time", "ip", "port"):
         if hasattr(d, attr):
-            v = getattr(d, attr)
             try:
-                meta[attr] = v
+                meta[attr] = getattr(d, attr)
             except Exception:
-                meta[attr] = str(v)
+                meta[attr] = str(getattr(d, attr))
     return meta if meta else str(d)
 
 
@@ -98,48 +82,48 @@ def _axon_meta(mg: bt.metagraph, uid: int) -> dict:
 def _synapse_payload(item: Any) -> Any:
     if item is None:
         return None
-    if isinstance(item, (int, float)) and not isinstance(item, bool):
-        return {"deserialized_only": float(item)}
-    out: dict = {"result": getattr(item, "result", None)}
-    for k in ("operand_a", "operand_b", "op"):
-        if hasattr(item, k):
-            out[k] = getattr(item, k)
+    if isinstance(item, str):
+        return {"deserialized_only": item}
+    out: dict = {"video_url": getattr(item, "video_url", None)}
+    if hasattr(item, "task"):
+        out["task"] = getattr(item, "task")
     out["dendrite"] = _dendrite_meta(item)
     return out
 
 
 def _hotkey_at(mg: bt.metagraph, uid: int) -> Optional[str]:
     try:
-        h = mg.hotkeys[uid]
-        return str(h)
+        return str(mg.hotkeys[uid])
     except Exception:
         return None
 
 
-async def run_math_probe(
+async def run_vla_probe(
     *,
     netuid: int,
     chain_endpoint: str,
     wallet_name: str,
     hotkey: str = "default",
+    task: str,
     miner_uids: Optional[List[int]] = None,
     sample_size: int = 4,
-    operand_a: int = 6,
-    operand_b: int = 7,
-    op: str = "*",
-    timeout: float = 30.0,
+    timeout: float = 60.0,
 ) -> dict:
     t0 = time.perf_counter()
-    if op not in ALLOWED_OPS:
-        return {"ok": False, "error": f"op must be one of {ALLOWED_OPS}"}
+    task_n = normalize_task(task)
+    if not is_allowed_task(task_n):
+        return {
+            "ok": False,
+            "error": f"task must be one of {ALLOWED_TASKS}",
+            "allowed_tasks": list(ALLOWED_TASKS),
+        }
 
     wallet = bt.Wallet(name=wallet_name, hotkey=hotkey)
     subtensor = bt.Subtensor(network=chain_endpoint)
     mg = subtensor.metagraph(netuid)
 
     uids_list = _pick_miner_uids(mg, miner_uids, sample_size)
-    expected = _expected_value(operand_a, operand_b, op)
-    synapse = MathSynapse(operand_a=operand_a, operand_b=operand_b, op=op)
+    synapse = VLASynapse(task=task_n)
     axons = [mg.axons[u] for u in uids_list]
 
     dendrite = bt.Dendrite(wallet)
@@ -170,25 +154,23 @@ async def run_math_probe(
     else:
         raw_list = [raw_out]
 
-    responses_float: List[Optional[float]] = []
+    str_responses: List[Optional[str]] = []
     miners: List[dict] = []
     for i, uid in enumerate(uids_list):
         item = raw_list[i] if i < len(raw_list) else None
-        fv = _extract_float_response(item)
-        responses_float.append(fv)
-        err_abs = abs(fv - expected) if fv is not None else None
+        url = _extract_url(item)
+        str_responses.append(url)
         miners.append(
             {
                 "uid": int(uid),
                 "hotkey_ss58": _hotkey_at(mg, uid),
                 "axon": _axon_meta(mg, uid),
-                "response_float": fv,
+                "video_url": url,
                 "synapse": _synapse_payload(item),
-                "abs_error": err_abs,
             }
         )
 
-    rewards = get_rewards(_RewardLogCtx(), expected=expected, responses=responses_float)
+    rewards = get_rewards(_RewardLogCtx(), responses=str_responses)
     rew_list = [float(x) for x in rewards.tolist()]
     for i, r in enumerate(rew_list):
         if i < len(miners):
@@ -199,18 +181,13 @@ async def run_math_probe(
 
     return {
         "ok": True,
-        "protocol": "subnet-math MathSynapse",
-        "bittensor_sdk_pinned": "9.7.0 (see subnet-math/requirements.txt in repo)",
+        "protocol": "subnet-vla VLASynapse",
+        "bittensor_sdk_pinned": "9.7.0 (see requirements.txt)",
         "netuid": netuid,
         "chain_endpoint": chain_endpoint,
         "wallet_coldkey": wallet_name,
         "dendrite_deserialize_flag": not used_deserialize_true,
-        "request": {
-            "operand_a": operand_a,
-            "operand_b": operand_b,
-            "op": op,
-            "expected": expected,
-        },
+        "request": {"task": task_n, "allowed_tasks": list(ALLOWED_TASKS)},
         "miner_uids_queried": uids_list,
         "miners": miners,
         "rewards": rew_list,
