@@ -23,3 +23,5 @@
 `scripts/vla_probe_http.py` — `POST /v1/vla-probe`, тело JSON с полем `task`.
 
 Интеграция с репозиторием **xsubtensor**: см. `REQUEST_TO_SUBNET_VLA.md` и `docker-compose.subnet-vla.yml`.
+
+Оценка видео (пайплайн для `vla-video-analyzer`): каталог **`video-robot-eval/`** внутри этого же дерева `subnet-vla/`.

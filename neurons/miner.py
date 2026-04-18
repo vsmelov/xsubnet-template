@@ -14,6 +14,7 @@ from template.protocol import (
     is_allowed_task,
     normalize_task,
 )
+from template.vla_stub_rollout_log import run_verbose_stub_rollout
 
 
 class Miner(BaseMinerNeuron):
@@ -35,18 +36,12 @@ class Miner(BaseMinerNeuron):
 
         req_id = str(uuid.uuid4())[:8]
         t0 = time.monotonic()
-        bt.logging.info(
-            f"VLA inference [{req_id}] POST api.lambda.ai/gpu/v1/vla/rollout "
-            f"(OpenVLA-7B on A10G; worker reports model weights VRAM-resident — warm, no cold start)"
-        )
-        bt.logging.info(
-            f"VLA inference [{req_id}] prompt_len={len(task)} task={task!r}"
-        )
+        run_verbose_stub_rollout(task, req_id)
         synapse.video_url = STUB_RESULT_VIDEO_URL
-        dt_ms = (time.monotonic() - t0) * 1000.0
+        dt_s = time.monotonic() - t0
         bt.logging.info(
-            f"VLA inference [{req_id}] rollout_uri received in {dt_ms:.1f} ms "
-            f"(decoder session cached on worker) -> {synapse.video_url}"
+            f"VLA inference [{req_id}] rollout_uri ready after {dt_s:.2f}s "
+            f"(stub pipeline) -> {synapse.video_url}"
         )
         return synapse
 

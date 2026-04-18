@@ -43,4 +43,4 @@ async def forward(self):
     bt.logging.info("VLA_SCOREBOARD " + json.dumps(scoreboard))
 
     self.update_scores(rewards, miner_uids)
-    time.sleep(5)
+    time.sleep(float(self.config.neuron.forward_sleep))

@@ -1,0 +1,5 @@
+Place MP4s here. Stub used by miners (same path as public URL after /videos/):
+  results_tidy/40.mp4
+Example download:
+  curl -sS -o results_tidy/40.mp4 "https://konnex-ai.xyz/videos/results_tidy/40.mp4"
+Served by vla-probe: GET http://127.0.0.1:8094/videos/results_tidy/40.mp4

@@ -188,6 +188,13 @@ def add_validator_args(cls, parser):
     )
 
     parser.add_argument(
+        "--neuron.forward_sleep",
+        type=float,
+        help="Seconds to sleep after each validator forward (between quiz rounds).",
+        default=3600.0,
+    )
+
+    parser.add_argument(
         "--neuron.num_concurrent_forwards",
         type=int,
         help="The number of concurrent forwards running at any time.",
