@@ -96,9 +96,30 @@ def _connect_client() -> Any:
 def _capture_lit_jpeg_b64(client: Any) -> str:
     import cv2
 
-    data = client.request("vget /camera/1/lit png")
-    if not data:
-        raise RuntimeError("empty vget /camera/1/lit png")
+    last_err: str | None = None
+    data: bytes | None = None
+    for cam in ("1", "0"):
+        raw = client.request(f"vget /camera/{cam}/lit png")
+        if not raw:
+            last_err = f"empty vget /camera/{cam}/lit png"
+            continue
+        if isinstance(raw, str):
+            head = raw.strip().splitlines()[0].strip()
+            if head.lower().startswith("error ") or "invalid sensor" in head.lower():
+                last_err = head[:500]
+                continue
+            path = Path(head)
+            if not path.is_file():
+                last_err = f"vget lit png path missing: {raw!r}"
+                continue
+            data = path.read_bytes()
+            break
+        if isinstance(raw, (bytes, bytearray, memoryview)):
+            data = bytes(raw)
+            break
+        last_err = f"unexpected vget payload type {type(raw)!r}"
+    if data is None:
+        raise RuntimeError(last_err or "vget /camera/*/lit png failed")
     arr = np.frombuffer(data, dtype=np.uint8)
     img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
     if img is None:

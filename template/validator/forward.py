@@ -17,7 +17,9 @@
 # OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 
+import copy
 import json
+import os
 import time
 
 import bittensor as bt
@@ -26,6 +28,37 @@ from template.validator.reward import get_rewards
 from template.validator.synthetic_context import build_synthetic_drone_nav_synapse
 from template.validator.ue_synthetic import maybe_teleport_and_frame
 from template.utils.uids import get_random_uids
+
+_BIND_LOCAL_AXON_IPS = frozenset({"0.0.0.0", "::", "[::]"})
+
+
+def _axons_for_dendrite(validator_self, miner_uids):
+    """Route dendrite to miners when running in Docker / network_mode: service:openfly-ue.
+
+    - Chain axon ip ``0.0.0.0`` (or ::): replace with OPENFLY_VALIDATOR_MINER_AXON_HOST.
+    - Same public IP as ``dendrite.external_ip``: bittensor maps that to ``0.0.0.0:port`` (loopback), which
+      does not reach a host-published miner from this netns — replace with the same host.
+    """
+    metagraph = validator_self.metagraph
+    fallback = (os.environ.get("OPENFLY_VALIDATOR_MINER_AXON_HOST") or "").strip()
+    ext_ip = str(getattr(validator_self.dendrite, "external_ip", "") or "").strip()
+    out = []
+    for uid in miner_uids:
+        axon = metagraph.axons[uid]
+        if not fallback:
+            out.append(axon)
+            continue
+        ip = getattr(axon, "ip", None)
+        ip_s = str(ip).strip() if ip is not None else ""
+        bind_like = ip is None or ip_s in _BIND_LOCAL_AXON_IPS
+        same_public = bool(ext_ip) and ip_s == ext_ip
+        if bind_like or same_public:
+            patched = copy.copy(axon)
+            patched.ip = fallback
+            out.append(patched)
+        else:
+            out.append(axon)
+    return out
 
 
 async def forward(self):
@@ -54,7 +87,7 @@ async def forward(self):
     instruction = str(synapse.instruction)
 
     responses = await self.dendrite(
-        axons=[self.metagraph.axons[uid] for uid in miner_uids],
+        axons=_axons_for_dendrite(self, miner_uids),
         synapse=synapse,
         deserialize=False,
         timeout=float(self.config.neuron.timeout),

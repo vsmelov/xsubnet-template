@@ -38,6 +38,14 @@ mkdir -p "$XDG_RUNTIME_DIR"
 chmod 700 "$XDG_RUNTIME_DIR"
 export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-x11}"
 
+# Optional: remove stale X locks/sockets (e.g. orphan .X9-lock in a persistent Docker /tmp volume).
+if [[ "${OPENFLY_UE_SCRUB_TMP_X11:-0}" =~ ^(1|true|yes|on)$ ]]; then
+  rm -f /tmp/.X*-lock 2>/dev/null || true
+  rm -rf /tmp/.X11-unix 2>/dev/null || true
+  mkdir -p /tmp/.X11-unix
+  chmod 1777 /tmp/.X11-unix 2>/dev/null || true
+fi
+
 # Shared /tmp (Docker named volume with validator, or host bind-mount): remove stale X lock for this display.
 rm -f "/tmp/.X11-unix/X${DISPLAY#:}" "/tmp/.X${DISPLAY#:}-lock"
 Xvfb "${DISPLAY}" -screen 0 1920x1080x24 -ac +extension RANDR +render -noreset &>/tmp/openfly-ue-xvfb.log &

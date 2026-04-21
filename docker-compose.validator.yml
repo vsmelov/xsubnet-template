@@ -28,6 +28,9 @@ services:
       context: .
       dockerfile: docker/openfly-ue/Dockerfile
     image: xsubnet-openfly-ue:local
+    # Validator uses network_mode: service:openfly-ue — extra_hosts apply to this netns for dendrite → host-published miner.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     restart: unless-stopped
     depends_on:
       assets-init:
@@ -44,6 +47,8 @@ services:
       OPENFLY_UE_LOGFILE: /app/logs/ue/citysample_stdout.log
       # Isolate Xvfb/UnrealCV /tmp from the host bind-mount (stale .X*-lock from other runs break startup).
       OPENFLY_UE_XVFB_DISPLAY: "${OPENFLY_UE_XVFB_DISPLAY:-:99}"
+      # Named /tmp volume can keep orphan .X*-lock across restarts — scrub before Xvfb.
+      OPENFLY_UE_SCRUB_TMP_X11: "${OPENFLY_UE_SCRUB_TMP_X11:-1}"
     volumes:
       - ./OpenFly-Platform:/app/OpenFly-Platform:rw
       # Shared with subnet-validator only: UDS + X locks stay off the host tree.
@@ -89,6 +94,8 @@ services:
       OPENFLY_TELEPORT_SPOTS_JSON: "${OPENFLY_TELEPORT_SPOTS_JSON:-/app/data/teleport_spots.json}"
       OPENFLY_SYNTHETIC_POST_TELEPORT_SLEEP_SEC: "${OPENFLY_SYNTHETIC_POST_TELEPORT_SLEEP_SEC:-2}"
       OPENFLY_MODEL: /app/models/openfly-agent-7b
+      # Metagraph often has axon ip 0.0.0.0; reach host-published miner ports from UE netns (see openfly-ue extra_hosts).
+      OPENFLY_VALIDATOR_MINER_AXON_HOST: "${OPENFLY_VALIDATOR_MINER_AXON_HOST:-host.docker.internal}"
     command:
       - python
       - neurons/validator.py
