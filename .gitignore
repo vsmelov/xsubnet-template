@@ -121,6 +121,7 @@ celerybeat.pid
 
 # Environments
 .env
+.env.subnet
 .venv
 env/
 venv/
@@ -160,6 +161,11 @@ cython_debug/
 #.idea/
 
 testing/
+logs/
+models/
+
+# Bittensor wallet tree — bind-mounted as ./wallets -> /root/.bittensor/wallets (never commit keys)
+wallets/
 
 # Editors
 .vscode/settings.json

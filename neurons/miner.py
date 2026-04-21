@@ -17,20 +17,42 @@
 # OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
 # DEALINGS IN THE SOFTWARE.
 
-import operator
+import json
+import os
 import random
 import time
 import typing
+import urllib.error
+import urllib.request
+
 import bittensor as bt
 
-# Bittensor Miner Template:
 import template
-
-# import base miner class which takes care of most of the boilerplate
 from template.base.miner import BaseMinerNeuron
-from template.protocol import ALLOWED_OPS
+from template.openfly_policy_io import (
+    canonicalize_exit_action_id,
+    normalize_user_instruction,
+    structured_explain_discrete,
+)
+from template.protocol import ACTION_LABELS, ALLOWED_ACTION_IDS
 
-_OPS = {"+": operator.add, "-": operator.sub, "*": operator.mul}
+
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int((os.environ.get(name, str(default)) or str(default)).strip())
+    except ValueError:
+        return default
+
+
+def _resolve_miner_model_mode() -> str:
+    raw = (os.environ.get("OPENFLY_SUBNET_MINER_MODEL", "openai") or "openai").strip().lower()
+    if raw == "openfly":
+        return "openfly"
+    if raw != "openai":
+        bt.logging.warning(
+            f"OPENFLY_SUBNET_MINER_MODEL={raw!r} is not openai|openfly; using openai"
+        )
+    return "openai"
 
 
 class Miner(BaseMinerNeuron):
@@ -45,27 +67,318 @@ class Miner(BaseMinerNeuron):
     def __init__(self, config=None):
         super(Miner, self).__init__(config=config)
 
-        # TODO(developer): Anything specific to your use case you can do here
+        self._policy_backend = _resolve_miner_model_mode()
+        self._warned_openfly_no_url = False
+        bt.logging.info(f"OPENFLY_SUBNET_MINER_MODEL -> policy backend: {self._policy_backend}")
+
+    def _openai_key(self) -> str:
+        return os.environ.get("OPENAI_API_TOKEN", "").strip()
+
+    def _openai_model(self) -> str:
+        return (
+            os.environ.get("OPENFLY_SUBNET_MINER_OPENAI_MODEL", "").strip()
+            or os.environ.get("OPENAI_GPT_POLICY_MODEL", "").strip()
+            or "gpt-4.1-mini"
+        )
+
+    def _expected_action_heuristic(self, instruction: str) -> int:
+        t = instruction.lower()
+        if "stop" in t or "hold" in t or "wait" in t:
+            return 0
+        if "left" in t and "strafe" not in t:
+            return 2
+        if "right" in t and "strafe" not in t:
+            return 3
+        if "strafe left" in t:
+            return 6
+        if "strafe right" in t:
+            return 7
+        if "up" in t or "ascend" in t:
+            return 4
+        if "down" in t or "descend" in t:
+            return 5
+        if "photo" in t or "snapshot" in t:
+            return 10
+        return 1
+
+    def _rule_based_candidate(self, instruction: str, *, tag: str) -> dict[str, typing.Any]:
+        ins = normalize_user_instruction(instruction)
+        aid = self._expected_action_heuristic(ins)
+        lab = ACTION_LABELS.get(aid, f"unknown_{aid}")
+        return {
+            "action_id": aid,
+            "label": lab,
+            "confidence": 0.55,
+            "explain": structured_explain_discrete(
+                backend="heuristic",
+                instruction=ins,
+                action_id=aid,
+                label_semantic=lab,
+                note=tag,
+            ),
+        }
+
+    def _call_openai_candidate(
+        self,
+        *,
+        instruction: str,
+        synthetic_context_json: str | None,
+        frame_jpeg_b64: str | None,
+        temperature: float,
+    ) -> dict[str, typing.Any]:
+        ins = normalize_user_instruction(instruction)
+        key = self._openai_key()
+        if not key:
+            return self._rule_based_candidate(ins, tag=f"temp={temperature:.1f}")
+        url = os.environ.get("OPENAI_API_BASE", "https://api.openai.com/v1").rstrip("/") + "/chat/completions"
+        sys_prompt = (
+            "You are an OpenFly drone policy miner. Return strict JSON object only with keys: "
+            "action_id (int), confidence (0..1), explain (short string). "
+            f"Allowed action_id values: {list(ALLOWED_ACTION_IDS)}."
+        )
+        user_blob = {
+            "instruction": ins,
+            "synthetic_context_json": synthetic_context_json or "",
+            "has_frame": bool(frame_jpeg_b64),
+        }
+        messages: list[dict[str, typing.Any]] = [
+            {"role": "system", "content": sys_prompt},
+            {"role": "user", "content": json.dumps(user_blob, ensure_ascii=False)},
+        ]
+        if frame_jpeg_b64:
+            messages.append(
+                {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": "Optional vision context frame."},
+                        {
+                            "type": "image_url",
+                            "image_url": {"url": f"data:image/jpeg;base64,{frame_jpeg_b64}"},
+                        },
+                    ],
+                }
+            )
+        body = {
+            "model": self._openai_model(),
+            "temperature": float(temperature),
+            "max_tokens": 220,
+            "response_format": {"type": "json_object"},
+            "messages": messages,
+        }
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(body).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {key}",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=45) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+            raw = (
+                payload.get("choices", [{}])[0]
+                .get("message", {})
+                .get("content", "")
+            )
+            obj = json.loads(raw) if raw else {}
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError, ValueError) as e:
+            bt.logging.warning(f"openai miner candidate failed: {type(e).__name__}: {e}")
+            return self._rule_based_candidate(ins, tag=f"temp={temperature:.1f}:fallback")
+        aid = canonicalize_exit_action_id(
+            int(obj.get("action_id", self._expected_action_heuristic(ins)))
+        )
+        if aid not in ALLOWED_ACTION_IDS:
+            aid = self._expected_action_heuristic(ins)
+        conf_raw = obj.get("confidence", 0.5)
+        try:
+            conf = max(0.0, min(1.0, float(conf_raw)))
+        except (TypeError, ValueError):
+            conf = 0.5
+        exp = str(obj.get("explain", "") or "").strip()[:500]
+        lab = ACTION_LABELS.get(aid, f"unknown_{aid}")
+        if exp:
+            explain_out = exp
+        else:
+            explain_out = structured_explain_discrete(
+                backend="openai",
+                instruction=ins,
+                action_id=aid,
+                label_semantic=lab,
+                note="model returned empty explain",
+            )
+        return {
+            "action_id": aid,
+            "label": lab,
+            "confidence": conf,
+            "explain": explain_out,
+        }
+
+    def _openfly_policy_url(self) -> str:
+        return os.environ.get("OPENFLY_SUBNET_MINER_OPENFLY_URL", "").strip()
+
+    def _call_openfly_http_candidate(
+        self,
+        *,
+        instruction: str,
+        synthetic_context_json: str | None,
+        frame_jpeg_b64: str | None,
+    ) -> dict[str, typing.Any]:
+        ins = normalize_user_instruction(instruction)
+        url = self._openfly_policy_url()
+        if not url:
+            if not self._warned_openfly_no_url:
+                bt.logging.warning(
+                    "OPENFLY_SUBNET_MINER_MODEL=openfly but OPENFLY_SUBNET_MINER_OPENFLY_URL is empty; "
+                    "using heuristic until a URL is set"
+                )
+                self._warned_openfly_no_url = True
+            return self._rule_based_candidate(ins, tag="openfly:no_url")
+        timeout_s = max(5, _env_int("OPENFLY_SUBNET_MINER_OPENFLY_TIMEOUT", 120))
+        body = {
+            "instruction": ins,
+            "synthetic_context_json": synthetic_context_json or "",
+            "frame_jpeg_b64": frame_jpeg_b64 or "",
+        }
+        req = urllib.request.Request(
+            url,
+            data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=float(timeout_s)) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError, ValueError) as e:
+            bt.logging.warning(f"openfly HTTP miner candidate failed: {type(e).__name__}: {e}")
+            return self._rule_based_candidate(ins, tag="openfly:http_error")
+        if isinstance(payload, dict) and isinstance(payload.get("result"), dict):
+            payload = payload["result"]
+        aid_raw = payload.get("action_id", self._expected_action_heuristic(ins))
+        try:
+            aid = canonicalize_exit_action_id(int(aid_raw))
+        except (TypeError, ValueError):
+            aid = self._expected_action_heuristic(ins)
+        if aid not in ALLOWED_ACTION_IDS:
+            aid = self._expected_action_heuristic(ins)
+        conf_raw = payload.get("confidence", 0.75)
+        try:
+            conf = max(0.0, min(1.0, float(conf_raw)))
+        except (TypeError, ValueError):
+            conf = 0.75
+        exp = str(payload.get("explain", "") or "").strip()[:500]
+        lab = ACTION_LABELS.get(aid, f"unknown_{aid}")
+        if exp:
+            explain_out = exp
+        else:
+            explain_out = structured_explain_discrete(
+                backend="openfly",
+                instruction=ins,
+                action_id=aid,
+                label_semantic=lab,
+                note="http model returned empty explain",
+            )
+        return {
+            "action_id": aid,
+            "label": lab,
+            "confidence": conf,
+            "explain": explain_out,
+        }
+
+    def _mine_instruction_openai(
+        self,
+        instruction: str,
+        synthetic_context_json: str | None,
+        frame_jpeg_b64: str | None,
+    ) -> dict[str, typing.Any]:
+        temps = (0.2, 0.8, 0.8)
+        miners: list[dict[str, typing.Any]] = []
+        for i, t in enumerate(temps):
+            cand = self._call_openai_candidate(
+                instruction=instruction,
+                synthetic_context_json=synthetic_context_json,
+                frame_jpeg_b64=frame_jpeg_b64,
+                temperature=t,
+            )
+            cand["miner_index"] = i
+            cand["temperature"] = t
+            miners.append(cand)
+        winner = max(miners, key=lambda x: float(x.get("confidence", 0.0)))
+        return {
+            "mode": "competition",
+            "winner_miner_index": int(winner["miner_index"]),
+            "miners": miners,
+            "action_id": int(winner["action_id"]),
+            "label": str(winner["label"]),
+            "confidence": float(winner.get("confidence", 0.0)),
+            "explain": str(winner.get("explain", "")),
+        }
+
+    def _mine_instruction_openfly(
+        self,
+        instruction: str,
+        synthetic_context_json: str | None,
+        frame_jpeg_b64: str | None,
+    ) -> dict[str, typing.Any]:
+        cand = self._call_openfly_http_candidate(
+            instruction=instruction,
+            synthetic_context_json=synthetic_context_json,
+            frame_jpeg_b64=frame_jpeg_b64,
+        )
+        return {
+            "mode": "openfly",
+            "action_id": int(cand["action_id"]),
+            "label": str(cand["label"]),
+            "confidence": float(cand.get("confidence", 0.0)),
+            "explain": str(cand.get("explain", "")),
+            "openfly": cand,
+        }
+
+    def _mine_instruction(
+        self,
+        instruction: str,
+        synthetic_context_json: str | None,
+        frame_jpeg_b64: str | None,
+    ) -> dict[str, typing.Any]:
+        if self._policy_backend == "openfly":
+            return self._mine_instruction_openfly(
+                instruction, synthetic_context_json, frame_jpeg_b64
+            )
+        return self._mine_instruction_openai(
+            instruction, synthetic_context_json, frame_jpeg_b64
+        )
 
     async def forward(
-        self, synapse: template.protocol.MathSynapse
-    ) -> template.protocol.MathSynapse:
-        op = (synapse.op or "").strip()
-        if op not in ALLOWED_OPS:
-            synapse.result = None
-            bt.logging.warning(f"Unsupported op {synapse.op!r}")
+        self, synapse: template.protocol.DroneNavSynapse
+    ) -> template.protocol.DroneNavSynapse:
+        instruction = str(synapse.instruction or "").strip()
+        if not instruction:
+            synapse.miner_error = "empty instruction"
+            synapse.action_id = None
+            synapse.confidence = 0.0
+            synapse.miner_response_json = json.dumps(
+                {"ok": False, "error": "empty instruction"},
+                ensure_ascii=False,
+            )
             return synapse
-        fn = _OPS[op]
-        exact = float(fn(int(synapse.operand_a), int(synapse.operand_b)))
-        noise = random.uniform(-0.1, 0.1)
-        synapse.result = exact + noise
+        pack = self._mine_instruction(
+            instruction=instruction,
+            synthetic_context_json=synapse.synthetic_context_json,
+            frame_jpeg_b64=synapse.frame_jpeg_b64,
+        )
+        synapse.action_id = int(pack["action_id"])
+        synapse.confidence = float(pack["confidence"])
+        synapse.miner_error = None
+        synapse.miner_response_json = json.dumps(pack, ensure_ascii=False)
         bt.logging.info(
-            f"Math: {synapse.operand_a} {op} {synapse.operand_b} -> exact={exact} noisy={synapse.result}"
+            f"DRONE_MINER task={synapse.task_id} action_id={synapse.action_id} "
+            f"conf={float(synapse.confidence or 0.0):.2f}"
         )
         return synapse
 
     async def blacklist(
-        self, synapse: template.protocol.MathSynapse
+        self, synapse: template.protocol.DroneNavSynapse
     ) -> typing.Tuple[bool, str]:
         """
         Determines whether an incoming request should be blacklisted and thus ignored. Your implementation should
@@ -76,7 +389,7 @@ class Miner(BaseMinerNeuron):
         requests before they are deserialized to avoid wasting resources on requests that will be ignored.
 
         Args:
-            synapse (template.protocol.MathSynapse): A synapse object constructed from the headers of the incoming request.
+            synapse (template.protocol.DroneNavSynapse): A synapse object constructed from request headers.
 
         Returns:
             Tuple[bool, str]: A tuple containing a boolean indicating whether the synapse's hotkey is blacklisted,
@@ -128,7 +441,7 @@ class Miner(BaseMinerNeuron):
         )
         return False, "Hotkey recognized!"
 
-    async def priority(self, synapse: template.protocol.MathSynapse) -> float:
+    async def priority(self, synapse: template.protocol.DroneNavSynapse) -> float:
         """
         The priority function determines the order in which requests are handled. More valuable or higher-priority
         requests are processed before others. You should design your own priority mechanism with care.
@@ -136,7 +449,7 @@ class Miner(BaseMinerNeuron):
         This implementation assigns priority to incoming requests based on the calling entity's stake in the metagraph.
 
         Args:
-            synapse (template.protocol.MathSynapse): The synapse object that contains metadata about the incoming request.
+            synapse (template.protocol.DroneNavSynapse): The synapse object with incoming request metadata.
 
         Returns:
             float: A priority score derived from the stake of the calling entity.

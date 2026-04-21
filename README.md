@@ -1,213 +1,119 @@
-<div align="center">
+# Konnex Drone Navigation Subnet
 
-# **Bittensor Subnet Template** <!-- omit in toc -->
-[![Discord Chat](https://img.shields.io/discord/308323056592486420.svg)](https://discord.gg/bittensor)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT) 
+Konnex drone-navigation runtime package with:
+- `subnet-miner`
+- `subnet-validator`
+- UnrealEngine sidecar (`openfly-ue`)
+- one-shot assets bootstrap (`assets-init`)
 
----
+## Environment (set this first)
 
-## The Incentivized Internet <!-- omit in toc -->
+Create `.env` from the template (this file is **only for this repo**; it does not replace `.env` in the parent `drone-navigation` tree):
 
-[Discord](https://discord.gg/bittensor) • [Network](https://taostats.io/) • [Research](https://bittensor.com/whitepaper)
-</div>
-
----
-- [Quickstarter template](#quickstarter-template)
-- [Introduction](#introduction)
-  - [Example](#example)
-- [Installation](#installation)
-  - [Before you proceed](#before-you-proceed)
-  - [Install](#install)
-- [Writing your own incentive mechanism](#writing-your-own-incentive-mechanism)
-- [Writing your own subnet API](#writing-your-own-subnet-api)
-- [Subnet Links](#subnet-links)
-- [License](#license)
-
----
-## Quickstarter template
-
-This template contains all the required installation instructions, scripts, and files and functions for:
-- Building Bittensor subnets.
-- Creating custom incentive mechanisms and running these mechanisms on the subnets. 
-
-In order to simplify the building of subnets, this template abstracts away the complexity of the underlying blockchain and other boilerplate code. While the default behavior of the template is sufficient for a simple subnet, you should customize the template in order to meet your specific requirements.
----
-
-## Introduction
-
-**IMPORTANT**: If you are new to Bittensor subnets, read this section before proceeding to [Installation](#installation) section. 
-
-The Bittensor blockchain hosts multiple self-contained incentive mechanisms called **subnets**. Subnets are playing fields in which:
-- Subnet miners who produce value, and
-- Subnet validators who produce consensus
-
-determine together the proper distribution of TAO for the purpose of incentivizing the creation of value, i.e., generating digital commodities, such as intelligence or data. 
-
-Each subnet consists of:
-- Subnet miners and subnet validators.
-- A protocol using which the subnet miners and subnet validators interact with one another. This protocol is part of the incentive mechanism.
-- The Bittensor API using which the subnet miners and subnet validators interact with Bittensor's onchain consensus engine [Yuma Consensus](https://bittensor.com/documentation/validating/yuma-consensus). The Yuma Consensus is designed to drive these actors: subnet validators and subnet miners, into agreement on who is creating value and what that value is worth. 
-
-This starter template is split into three primary files. To write your own incentive mechanism, you should edit these files. These files are:
-1. `template/protocol.py`: Contains the definition of the protocol used by subnet miners and subnet validators.
-2. `neurons/miner.py`: Script that defines the subnet miner's behavior, i.e., how the subnet miner responds to requests from subnet validators.
-3. `neurons/validator.py`: This script defines the subnet validator's behavior, i.e., how the subnet validator requests information from the subnet miners and determines the scores.
-
-### Example
-
-The Bittensor Subnet 1 for Text Prompting is built using this template. See [prompting](https://github.com/macrocosm-os/prompting) for how to configure the files and how to add monitoring and telemetry and support multiple miner types. Also see this Subnet 1 in action on [Taostats](https://taostats.io/subnets/netuid-1/) explorer.
-
----
-
-## Installation
-
-### Before you proceed
-Before you proceed with the installation of the subnet, note the following: 
-
-- Use these instructions to run your subnet locally for your development and testing, or on Bittensor testnet or on Bittensor mainnet. 
-- **IMPORTANT**: We **strongly recommend** that you first run your subnet locally and complete your development and testing before running the subnet on Bittensor testnet. Furthermore, make sure that you next run your subnet on Bittensor testnet before running it on the Bittensor mainnet.
-- You can run your subnet either as a subnet owner, or as a subnet validator or as a subnet miner. 
-- **IMPORTANT:** Make sure you are aware of the minimum compute requirements for your subnet. See the [Minimum compute YAML configuration](./min_compute.yml).
-- Note that installation instructions differ based on your situation: For example, installing for local development and testing will require a few additional steps compared to installing for testnet. Similarly, installation instructions differ for a subnet owner vs a validator or a miner. 
-
-### Install
-
-- **Running locally**: Follow the step-by-step instructions described in this section: [Running Subnet Locally](./docs/running_on_staging.md).
-- **Running on Bittensor testnet**: Follow the step-by-step instructions described in this section: [Running on the Test Network](./docs/running_on_testnet.md).
-- **Running on Bittensor mainnet**: Follow the step-by-step instructions described in this section: [Running on the Main Network](./docs/running_on_mainnet.md).
-
----
-
-## Writing your own incentive mechanism
-
-As described in [Quickstarter template](#quickstarter-template) section above, when you are ready to write your own incentive mechanism, update this template repository by editing the following files. The code in these files contains detailed documentation on how to update the template. Read the documentation in each of the files to understand how to update the template. There are multiple **TODO**s in each of the files identifying sections you should update. These files are:
-- `template/protocol.py`: Contains the definition of the wire-protocol used by miners and validators.
-- `neurons/miner.py`: Script that defines the miner's behavior, i.e., how the miner responds to requests from validators.
-- `neurons/validator.py`: This script defines the validator's behavior, i.e., how the validator requests information from the miners and determines the scores.
-- `template/forward.py`: Contains the definition of the validator's forward pass.
-- `template/reward.py`: Contains the definition of how validators reward miner responses.
-
-In addition to the above files, you should also update the following files:
-- `README.md`: This file contains the documentation for your project. Update this file to reflect your project's documentation.
-- `CONTRIBUTING.md`: This file contains the instructions for contributing to your project. Update this file to reflect your project's contribution guidelines.
-- `template/__init__.py`: This file contains the version of your project.
-- `setup.py`: This file contains the metadata about your project. Update this file to reflect your project's metadata.
-- `docs/`: This directory contains the documentation for your project. Update this directory to reflect your project's documentation.
-
-__Note__
-The `template` directory should also be renamed to your project name.
----
-
-# Writing your own subnet API
-To leverage the abstract `SubnetsAPI` in Bittensor, you can implement a standardized interface. This interface is used to interact with the Bittensor network and can be used by a client to interact with the subnet through its exposed axons.
-
-What does Bittensor communication entail? Typically two processes, (1) preparing data for transit (creating and filling `synapse`s) and (2), processing the responses received from the `axon`(s).
-
-This protocol uses a handler registry system to associate bespoke interfaces for subnets by implementing two simple abstract functions:
-- `prepare_synapse`
-- `process_responses`
-
-These can be implemented as extensions of the generic `SubnetsAPI` interface.  E.g.:
-
-
-This is abstract, generic, and takes(`*args`, `**kwargs`) for flexibility. See the extremely simple base class:
-```python
-class SubnetsAPI(ABC):
-    def __init__(self, wallet: "bt.wallet"):
-        self.wallet = wallet
-        self.dendrite = bt.dendrite(wallet=wallet)
-
-    async def __call__(self, *args, **kwargs):
-        return await self.query_api(*args, **kwargs)
-
-    @abstractmethod
-    def prepare_synapse(self, *args, **kwargs) -> Any:
-        """
-        Prepare the synapse-specific payload.
-        """
-        ...
-
-    @abstractmethod
-    def process_responses(self, responses: List[Union["bt.Synapse", Any]]) -> Any:
-        """
-        Process the responses from the network.
-        """
-        ...
-
+```bash
+cd xsubnet-template
+cp .env.example .env
 ```
 
+**Everyone must set (chain + identities):**
+- `SUBTENSOR_CHAIN_ENDPOINT` — WebSocket RPC (e.g. `ws://127.0.0.1:9944` for localnet).
+- `NETUID` — subnet id you are registered on.
+- `MINER_WALLET_NAME`, `MINER_WALLET_HOTKEY`, `MINER_AXON_PORT` — miner axon identity.
+- `VALIDATOR_WALLET_NAME`, `VALIDATOR_WALLET_HOTKEY`, `VALIDATOR_AXON_PORT` — validator axon identity.
 
-Here is a toy example:
+**Wallets (project-local, no JSON paths in `.env`):** `MINER_*` / `VALIDATOR_*` are the **coldkey name** and **hotkey name** from `btcli` (e.g. `btcli wallet new_coldkey --wallet.name miner`). The SDK loads `coldkey` / `hotkeys/` files from a wallet **tree** on disk; you only pass those logical names in `.env`, not paths to `keyfile.json`.
 
-```python
-from bittensor.subnets import SubnetsAPI
-from MySubnet import MySynapse
+This template keeps keys next to the repo under **`./wallets/`** (listed in **`.gitignore`** — never commit it). Docker Compose bind-mounts **`./wallets` → `/root/.bittensor/wallets`** inside miner and validator containers. Create/populate that directory on the host first, for example:
 
-class MySynapseAPI(SubnetsAPI):
-    def __init__(self, wallet: "bt.wallet"):
-        super().__init__(wallet)
-        self.netuid = 99
-
-    def prepare_synapse(self, prompt: str) -> MySynapse:
-        # Do any preparatory work to fill the synapse
-        data = do_prompt_injection(prompt)
-
-        # Fill the synapse for transit
-        synapse = StoreUser(
-            messages=[data],
-        )
-        # Send it along
-        return synapse
-
-    def process_responses(self, responses: List[Union["bt.Synapse", Any]]) -> str:
-        # Look through the responses for information required by your application
-        for response in responses:
-            if response.dendrite.status_code != 200:
-                continue
-            # potentially apply post processing
-            result_data = postprocess_data_from_response(response)
-        # return data to the client
-        return result_data
+```bash
+cd xsubnet-template
+mkdir -p wallets
+export BT_WALLET_PATH="$(pwd)/wallets"
+btcli wallet new_coldkey --wallet.name miner
+# …repeat for validator, or copy an existing tree: rsync -a ~/.bittensor/wallets/<name>/ ./wallets/<name>/
 ```
 
-You can use a subnet API to the registry by doing the following:
-1. Download and install the specific repo you want
-1. Import the appropriate API handler from bespoke subnets
-1. Make the query given the subnet specific API
+For **host-run** `python neurons/…` or **`offchain_validator_smoke.py`**, set the same `BT_WALLET_PATH` (or symlink `./wallets` to your usual location) so the SDK sees the same files as Docker.
 
+**Security (same as any bind mount):** keys under `./wallets` are visible to any code in the container with that mount; treat `./wallets` like a **secret directory** on disk. For **mainnet / serious stake**, prefer a **hotkey-only** host, **coldkey offline**, separate keys for labs vs production, trusted images, and optionally a **read-only** mount (`:ro`) in a compose override if signing still works.
 
+**HF / assets (when you use auto-download):**
+- `HF_TOKEN` — **required** if Hugging Face assets are gated (UE zip / weights). Same role as `HUGGINGFACE_HUB_TOKEN`.
+- `OPENFLY_ASSET_AUTO_DOWNLOAD` — `1` (default): `assets-init` downloads model + UE before UE starts; `0`: you place `models/` and `OpenFly-Platform/envs/ue/...` yourself.
+- `OPENFLY_UE_ARCHIVE_URL` — optional; if set, UE is taken from this URL instead of the HF dataset.
+- `OPENFLY_UE_DATASET_REPO`, `OPENFLY_UE_DATASET_SUBDIR` — only matter when `OPENFLY_UE_ARCHIVE_URL` is empty; defaults match OpenFly_DataGen layout.
 
-# Subnet Links
-In order to see real-world examples of subnets in-action, see the `subnet_links.py` document or access them from inside the `template` package by:
-```python
-import template
-template.SUBNET_LINKS
-[{'name': 'sn0', 'url': ''},
- {'name': 'sn1', 'url': 'https://github.com/opentensor/prompting/'},
- {'name': 'sn2', 'url': 'https://github.com/bittranslateio/bittranslate/'},
- {'name': 'sn3', 'url': 'https://github.com/gitphantomman/scraping_subnet/'},
- {'name': 'sn4', 'url': 'https://github.com/manifold-inc/targon/'},
-...
-]
+**Miner policy (`neurons/miner.py`):**
+- `OPENFLY_SUBNET_MINER_MODEL` — `openai` (default) or `openfly`.
+  - **`openai`** — three sampled Chat Completions “competition” winners (same temperatures as before). Set **`OPENAI_API_TOKEN`** in `.env`. Without it the miner falls back to a small heuristic.
+  - **`openfly`** — one call to your **OpenFly / VLM HTTP service** (the slim miner image has no PyTorch). Set `OPENFLY_SUBNET_MINER_OPENFLY_URL` to a POST endpoint. JSON body: `instruction`, `synthetic_context_json`, `frame_jpeg_b64` (strings; empty string if absent). JSON response: `action_id` (int), optional `confidence`, `explain`; you may wrap the object in `{ "result": { ... } }`. Optional: `OPENFLY_SUBNET_MINER_OPENFLY_TIMEOUT` (seconds, default 120). If the URL is empty, the miner uses the same heuristic as a stub until you configure the sidecar.
+- When `OPENFLY_SUBNET_MINER_MODEL=openai`: optional `OPENAI_API_BASE`, `OPENFLY_SUBNET_MINER_OPENAI_MODEL` / `OPENAI_GPT_POLICY_MODEL`.
+
+**Validator note:** the stock validator `forward` in this template does **not** call OpenAI or the OpenFly HTTP policy; only the miner does today.
+
+## Quick Start
+
+```bash
+cd xsubnet-template
+mkdir -p wallets logs/openfly-compose-tmp logs/ue-dashboard logs
+chmod 1777 logs/openfly-compose-tmp
+git submodule update --init --recursive
 ```
 
-## License
-This repository is licensed under the MIT License.
-```text
-# The MIT License (MIT)
-# Copyright © 2024 Opentensor Foundation
+Start miner:
 
-# Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
-# documentation files (the “Software”), to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software,
-# and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+```bash
+docker compose -f docker-compose.miner.yml up -d --build
+```
 
-# The above copyright notice and this permission notice shall be included in all copies or substantial portions of
-# the Software.
+Start validator + UE:
 
-# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
-# THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-# OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
+```bash
+docker compose -f docker-compose.validator.yml up -d --build
+```
+
+Check status:
+
+```bash
+docker compose -f docker-compose.validator.yml logs assets-init --tail 120
+docker compose -f docker-compose.validator.yml logs openfly-ue --tail 120
+docker compose -f docker-compose.validator.yml logs subnet-validator --tail 120
+docker compose -f docker-compose.miner.yml logs subnet-miner --tail 120
+```
+
+## Offchain smoke (validator → miners, no weights)
+
+This is **not** a separate chain mode: the script uses your **normal** subtensor RPC and metagraph, sends the same kind of `DroneNavSynapse` a validator would send, and prints rewards — **without** `set_weights` or running the full validator neuron.
+
+**Prerequisites:** subtensor reachable; **miner** registered on `NETUID`, axon serving (e.g. `docker compose -f docker-compose.miner.yml`); **validator** cold/hotkey exists on disk (`--wallet-name` / `--wallet-hotkey` are those **names**, same as in `.env`). Miner UID(s) must exist on the metagraph (`btcli subnet list` / wallet overview).
+
+From the repo host (needs local `bittensor` + this package on `PYTHONPATH`; or run inside a dev container with the same deps):
+
+```bash
+cd xsubnet-template
+export BT_WALLET_PATH="$(pwd)/wallets"
+PYTHONPATH=. python scripts/offchain_validator_smoke.py \
+  --netuid 1 --miner-uids 0 --rounds 1 --timeout 30 \
+  --wallet-name validator --wallet-hotkey default \
+  --subtensor.chain_endpoint ws://127.0.0.1:9944
+```
+
+Useful flags: `--rounds`, `--sleep`, `--instruction "..."`, `--tag-offchain` (marks `synthetic_context_json` for miners that log it). `OPENAI_API_TOKEN` belongs in the **miner** `.env` / environment if you use `OPENFLY_SUBNET_MINER_MODEL=openai`; the smoke script host does not need it.
+
+## Onchain Runtime
+
+After wallet/hotkey registration on your target network:
+
+```bash
+docker compose -f docker-compose.miner.yml up -d --build
+docker compose -f docker-compose.validator.yml up -d --build
+```
+
+## Reset OpenFly Submodule
+
+```bash
+cd xsubnet-template
+git submodule deinit -f OpenFly-Platform
+rm -rf OpenFly-Platform
+git submodule update --init --recursive OpenFly-Platform
 ```

@@ -1,0 +1,102 @@
+services:
+  assets-init:
+    build:
+      context: .
+      dockerfile: docker/assets-init/Dockerfile
+    image: xsubnet-assets-init:local
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      OPENFLY_ASSET_AUTO_DOWNLOAD: "${OPENFLY_ASSET_AUTO_DOWNLOAD:-1}"
+      OPENFLY_MODEL_DIR: /workspace/models/openfly-agent-7b
+      OPENFLY_MODEL_REPO: "${OPENFLY_MODEL_REPO:-IPEC-COMMUNITY/openfly-agent-7b}"
+      OPENFLY_UE_DIR: /workspace/OpenFly-Platform/envs/ue/env_ue_smallcity
+      OPENFLY_UE_ARCHIVE_URL: "${OPENFLY_UE_ARCHIVE_URL:-}"
+      OPENFLY_UE_DATASET_REPO: "${OPENFLY_UE_DATASET_REPO:-IPEC-COMMUNITY/OpenFly_DataGen}"
+      OPENFLY_UE_DATASET_SUBDIR: "${OPENFLY_UE_DATASET_SUBDIR:-ue/env_ue_smallcity}"
+      HF_TOKEN: "${HF_TOKEN:-}"
+    volumes:
+      - ./OpenFly-Platform:/workspace/OpenFly-Platform:rw
+      - ./models:/workspace/models:rw
+
+  openfly-ue:
+    build:
+      context: .
+      dockerfile: docker/openfly-ue/Dockerfile
+    image: xsubnet-openfly-ue:local
+    restart: unless-stopped
+    depends_on:
+      assets-init:
+        condition: service_completed_successfully
+    user: "${OPENFLY_DOCKER_UID:-1000}:${OPENFLY_DOCKER_GID:-1000}"
+    gpus: all
+    shm_size: "2gb"
+    environment:
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: all
+      OPENFLY_PLATFORM_ROOT: /app/OpenFly-Platform
+      OPENFLY_UNREALCV_PORT: "${OPENFLY_UNREALCV_PORT:-9030}"
+      OPENFLY_UE_LOGFILE: /app/logs/ue/citysample_stdout.log
+    volumes:
+      - ./OpenFly-Platform:/app/OpenFly-Platform:rw
+      - ./logs/openfly-compose-tmp:/tmp:rw
+      - ./logs/ue-dashboard:/app/logs/ue:rw
+    ports:
+      - "${OPENFLY_UNREALCV_PORT:-9030}:9030"
+      - "${VALIDATOR_AXON_PORT:-9101}:${VALIDATOR_AXON_PORT:-9101}"
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 ${OPENFLY_UNREALCV_PORT:-9030}"]
+      interval: 15s
+      timeout: 5s
+      retries: 45
+      start_period: 180s
+
+  subnet-validator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: xsubnet-drone-validator:local
+    restart: unless-stopped
+    depends_on:
+      assets-init:
+        condition: service_completed_successfully
+      openfly-ue:
+        condition: service_healthy
+    network_mode: "service:openfly-ue"
+    gpus: all
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NETUID: "${NETUID:-1}"
+      SUBTENSOR_CHAIN_ENDPOINT: "${SUBTENSOR_CHAIN_ENDPOINT:-ws://127.0.0.1:9944}"
+      WALLET_NAME: "${VALIDATOR_WALLET_NAME:-validator}"
+      WALLET_HOTKEY: "${VALIDATOR_WALLET_HOTKEY:-default}"
+      VALIDATOR_AXON_PORT: "${VALIDATOR_AXON_PORT:-9101}"
+      OPENFLY_UNREALCV_HOST: "127.0.0.1"
+      OPENFLY_UNREALCV_PORT: "${OPENFLY_UNREALCV_PORT:-9030}"
+      OPENFLY_UNREALCV_UDS_ON_ATTACH: "1"
+      OPENFLY_SYNTHETIC_UE_ENABLED: "1"
+      OPENFLY_SYNTHETIC_UE_SOCKET: "/tmp/unrealcv_${OPENFLY_UNREALCV_PORT:-9030}.socket"
+      OPENFLY_MODEL: /app/models/openfly-agent-7b
+    command:
+      - python
+      - neurons/validator.py
+      - --netuid
+      - ${NETUID:-1}
+      - --subtensor.chain_endpoint
+      - ${SUBTENSOR_CHAIN_ENDPOINT:-ws://127.0.0.1:9944}
+      - --wallet.name
+      - ${VALIDATOR_WALLET_NAME:-validator}
+      - --wallet.hotkey
+      - ${VALIDATOR_WALLET_HOTKEY:-default}
+      - --axon.port
+      - ${VALIDATOR_AXON_PORT:-9101}
+      - --logging.debug
+    volumes:
+      - ./logs:/app/logs:rw
+      - ./logs/openfly-compose-tmp:/tmp:rw
+      - ./OpenFly-Platform:/app/OpenFly-Platform:rw
+      - ./models:/app/models:rw
+      - ./wallets:/root/.bittensor/wallets:rw

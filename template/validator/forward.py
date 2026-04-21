@@ -18,16 +18,13 @@
 # DEALINGS IN THE SOFTWARE.
 
 import json
-import operator
-import random
 import time
+
 import bittensor as bt
 
-from template.protocol import ALLOWED_OPS, MathSynapse
 from template.validator.reward import get_rewards
+from template.validator.synthetic_context import build_synthetic_drone_nav_synapse
 from template.utils.uids import get_random_uids
-
-_OPS = {"+": operator.add, "-": operator.sub, "*": operator.mul}
 
 
 async def forward(self):
@@ -43,37 +40,36 @@ async def forward(self):
     # TODO(developer): Define how the validator selects a miner to query, how often, etc.
     # get_random_uids is an example method, but you can replace it with your own.
     miner_uids = get_random_uids(self, k=self.config.neuron.sample_size)
-
-    op = random.choice(ALLOWED_OPS)
-    a = random.randint(0, 99)
-    b = random.randint(0, 99)
-    expected = float(_OPS[op](a, b))
-    synapse = MathSynapse(operand_a=a, operand_b=b, op=op)
+    synapse, synthetic_context = build_synthetic_drone_nav_synapse(
+        validator_step=int(getattr(self, "step", 0)),
+    )
+    instruction = str(synapse.instruction)
 
     responses = await self.dendrite(
         axons=[self.metagraph.axons[uid] for uid in miner_uids],
         synapse=synapse,
-        deserialize=True,
+        deserialize=False,
+        timeout=float(self.config.neuron.timeout),
     )
-
-    bt.logging.info(
-        f"Math quiz {a} {op} {b} (expect {expected}), responses: {responses}"
-    )
-
-    rewards = get_rewards(self, expected=expected, responses=responses)
+    rewards, details = get_rewards(self, instruction=instruction, responses=responses)
 
     scoreboard = {
-        "expected": expected,
-        "op": op,
-        "a": a,
-        "b": b,
+        "task_id": str(synapse.task_id),
+        "instruction": instruction,
+        "synthetic_context": synthetic_context,
         "uids": [int(u) for u in miner_uids],
         "responses": [
-            float(r) if r is not None else None for r in responses
+            {
+                "action_id": getattr(r, "action_id", None),
+                "confidence": getattr(r, "confidence", None),
+                "error": getattr(r, "miner_error", None),
+            }
+            for r in responses
         ],
+        "verification": details,
         "rewards": [float(x) for x in rewards.tolist()],
     }
-    bt.logging.info("MATH_SCOREBOARD " + json.dumps(scoreboard))
+    bt.logging.info("DRONE_SCOREBOARD " + json.dumps(scoreboard, ensure_ascii=False))
 
     bt.logging.info(f"Scored responses: {rewards}")
     # Update the scores based on the rewards. You may want to define your own update_scores function for custom behavior.

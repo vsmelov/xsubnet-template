@@ -19,7 +19,7 @@
 
 import bittensor as bt
 from typing import List, Optional, Union, Any, Dict
-from template.protocol import MathSynapse
+from template.protocol import DroneNavSynapse
 from bittensor.subnets import SubnetsAPI
 
 
@@ -30,16 +30,16 @@ class DummyAPI(SubnetsAPI):
         self.name = "dummy"
 
     def prepare_synapse(
-        self, operand_a: int, operand_b: int, op: str
-    ) -> MathSynapse:
-        return MathSynapse(operand_a=operand_a, operand_b=operand_b, op=op)
+        self, instruction: str, task_id: str = "dummy-task"
+    ) -> DroneNavSynapse:
+        return DroneNavSynapse(instruction=instruction, task_id=task_id)
 
     def process_responses(
         self, responses: List[Union["bt.Synapse", Any]]
-    ) -> List[int]:
+    ) -> List[Dict[str, Any]]:
         outputs = []
         for response in responses:
             if response.dendrite.status_code != 200:
                 continue
-            outputs.append(response.result)
+            outputs.append(response.deserialize())
         return outputs

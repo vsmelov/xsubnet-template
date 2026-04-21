@@ -1,0 +1,35 @@
+services:
+  subnet-miner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: xsubnet-drone-miner:local
+    restart: unless-stopped
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      NETUID: "${NETUID:-1}"
+      SUBTENSOR_CHAIN_ENDPOINT: "${SUBTENSOR_CHAIN_ENDPOINT:-ws://127.0.0.1:9944}"
+      WALLET_NAME: "${MINER_WALLET_NAME:-miner}"
+      WALLET_HOTKEY: "${MINER_WALLET_HOTKEY:-default}"
+      MINER_AXON_PORT: "${MINER_AXON_PORT:-8091}"
+    command:
+      - python
+      - neurons/miner.py
+      - --netuid
+      - ${NETUID:-1}
+      - --subtensor.chain_endpoint
+      - ${SUBTENSOR_CHAIN_ENDPOINT:-ws://127.0.0.1:9944}
+      - --wallet.name
+      - ${MINER_WALLET_NAME:-miner}
+      - --wallet.hotkey
+      - ${MINER_WALLET_HOTKEY:-default}
+      - --axon.port
+      - ${MINER_AXON_PORT:-8091}
+      - --logging.debug
+    ports:
+      - "${MINER_AXON_PORT:-8091}:${MINER_AXON_PORT:-8091}"
+    volumes:
+      - ./logs:/app/logs:rw
+      - ./wallets:/root/.bittensor/wallets:rw

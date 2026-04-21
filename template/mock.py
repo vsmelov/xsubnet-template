@@ -1,15 +1,13 @@
-import operator
 import time
 
 import asyncio
 import random
+import json
 import bittensor as bt
 
 from typing import List
 
-from template.protocol import ALLOWED_OPS
-
-_OPS = {"+": operator.add, "-": operator.sub, "*": operator.mul}
+from template.protocol import ALLOWED_ACTION_IDS, ACTION_LABELS
 
 
 class MockWallet:
@@ -105,19 +103,46 @@ class MockDendrite(bt.Dendrite):
                 if process_time < timeout:
                     s.dendrite.process_time = str(time.time() - start_time)
                     # TODO (developer): replace with your own expected synapse data
-                    op = (s.op or "").strip()
-                    if op in ALLOWED_OPS:
-                        ex = float(
-                            _OPS[op](int(s.operand_a), int(s.operand_b))
-                        )
-                        s.result = ex + random.uniform(-0.1, 0.1)
-                    else:
-                        s.result = None
+                    t = str(getattr(s, "instruction", "") or "").lower()
+                    aid = 1
+                    if "stop" in t:
+                        aid = 0
+                    elif "left" in t and "strafe" not in t:
+                        aid = 2
+                    elif "right" in t and "strafe" not in t:
+                        aid = 3
+                    elif "up" in t:
+                        aid = 4
+                    elif "down" in t:
+                        aid = 5
+                    elif "strafe left" in t:
+                        aid = 6
+                    elif "strafe right" in t:
+                        aid = 7
+                    if aid not in ALLOWED_ACTION_IDS:
+                        aid = 1
+                    conf = max(0.0, min(1.0, 0.5 + random.uniform(-0.2, 0.2)))
+                    s.action_id = aid
+                    s.confidence = conf
+                    s.miner_error = None
+                    s.miner_response_json = json.dumps(
+                        {
+                            "mode": "mock",
+                            "action_id": aid,
+                            "label": ACTION_LABELS.get(aid, "forward"),
+                            "confidence": conf,
+                            "explain": "mock dendrite response",
+                        },
+                        ensure_ascii=False,
+                    )
                     s.dendrite.status_code = 200
                     s.dendrite.status_message = "OK"
                     synapse.dendrite.process_time = str(process_time)
                 else:
-                    s.result = float(s.operand_a)
+                    s.action_id = None
+                    s.confidence = 0.0
+                    s.miner_error = "timeout"
+                    s.miner_response_json = json.dumps({"ok": False, "error": "timeout"})
                     s.dendrite.status_code = 408
                     s.dendrite.status_message = "Timeout"
                     synapse.dendrite.process_time = str(timeout)

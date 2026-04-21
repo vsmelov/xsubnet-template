@@ -183,14 +183,14 @@ def add_validator_args(cls, parser):
     parser.add_argument(
         "--neuron.timeout",
         type=float,
-        help="The timeout for each forward call in seconds.",
+        help="Dendrite timeout in seconds for each miner query during validator forward.",
         default=10,
     )
 
     parser.add_argument(
         "--neuron.forward_sleep",
         type=float,
-        help="Seconds to sleep after each validator forward (between quiz rounds).",
+        help="Seconds to sleep after each synthetic validator forward (pause between rounds).",
         default=3600.0,
     )
 

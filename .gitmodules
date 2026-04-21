@@ -1,0 +1,3 @@
+[submodule "OpenFly-Platform"]
+	path = OpenFly-Platform
+	url = git@github.com:vsmelov/OpenFly-Platform.git

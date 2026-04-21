@@ -24,7 +24,7 @@ import numpy as np
 
 from neurons.validator import Validator
 from template.base.validator import BaseValidatorNeuron
-from template.protocol import MathSynapse
+from template.protocol import DroneNavSynapse
 from template.utils.uids import get_random_uids
 from template.validator.reward import get_rewards
 
@@ -60,9 +60,10 @@ class TemplateValidatorNeuronTestCase(unittest.TestCase):
         pass
 
     def test_dummy_responses(self):
-        step = self.neuron.step
-        synapse = MathSynapse(operand_a=step, operand_b=2, op="*")
-        expected = step * 2
+        synapse = DroneNavSynapse(
+            instruction="Move forward to the target building.",
+            task_id=f"test-{self.neuron.step}",
+        )
 
         responses = self.neuron.dendrite.query(
             axons=[
@@ -73,12 +74,12 @@ class TemplateValidatorNeuronTestCase(unittest.TestCase):
         )
 
         for response in responses:
-            self.assertLess(abs(float(response) - float(expected)), 0.11)
+            self.assertIsInstance(response, dict)
+            self.assertIn("action_id", response)
 
     def test_reward(self):
-        step = self.neuron.step
-        synapse = MathSynapse(operand_a=step, operand_b=2, op="*")
-        expected = float(step * 2)
+        instruction = "Turn left and align with the road."
+        synapse = DroneNavSynapse(instruction=instruction, task_id="reward-test")
 
         responses = self.neuron.dendrite.query(
             axons=[
@@ -88,14 +89,13 @@ class TemplateValidatorNeuronTestCase(unittest.TestCase):
             deserialize=True,
         )
 
-        rewards = get_rewards(self.neuron, expected=expected, responses=responses)
+        rewards, _details = get_rewards(self.neuron, instruction=instruction, responses=responses)
         self.assertAlmostEqual(float(np.sum(rewards)), 1.0, places=5)
         self.assertTrue(np.all(rewards >= 0))
 
     def test_reward_with_nan(self):
-        step = self.neuron.step
-        synapse = MathSynapse(operand_a=step, operand_b=2, op="*")
-        expected = float(step * 2)
+        instruction = "Stop when destination reached."
+        synapse = DroneNavSynapse(instruction=instruction, task_id="reward-nan-test")
 
         responses = self.neuron.dendrite.query(
             axons=[
@@ -105,10 +105,8 @@ class TemplateValidatorNeuronTestCase(unittest.TestCase):
             deserialize=True,
         )
 
-        rewards = np.array(
-            get_rewards(self.neuron, expected=expected, responses=responses),
-            copy=True,
-        )
+        rewards, _details = get_rewards(self.neuron, instruction=instruction, responses=responses)
+        rewards = np.array(rewards, copy=True)
         expected_rewards = rewards.copy()
         # Add NaN values to rewards
         rewards[0] = float("nan")
