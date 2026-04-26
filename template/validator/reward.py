@@ -1,54 +1,108 @@
 # The MIT License (MIT)
 # Copyright © 2023 Yuma Rao
-# TODO(developer): Set your name
 # Copyright © 2023 <your name>
 
-# Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
-# documentation files (the “Software”), to deal in the Software without restriction, including without limitation
-# the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software,
-# and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
-
-# The above copyright notice and this permission notice shall be included in all copies or substantial portions of
-# the Software.
-
-# THE SOFTWARE IS PROVIDED “AS IS”, WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
-# THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
-# THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
-# OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
-# DEALINGS IN THE SOFTWARE.
 import typing
+import hashlib
 
 import numpy as np
 import bittensor as bt
 
 
+def _coerce_float(value: typing.Any) -> typing.Optional[float]:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _lookup(obj: typing.Any, key: str) -> typing.Any:
+    if obj is None:
+        return None
+    if isinstance(obj, dict):
+        return obj.get(key)
+    return getattr(obj, key, None)
+
+
+def _extract_explicit_score(response: typing.Any) -> typing.Optional[float]:
+    direct = _coerce_float(_lookup(response, "score"))
+    if direct is not None:
+        return direct
+    scoring = _lookup(response, "scoring")
+    return _coerce_float(_lookup(scoring, "score"))
+
+
+def _extract_video_ref(response: typing.Any) -> typing.Optional[str]:
+    if response is None:
+        return None
+    if isinstance(response, str):
+        out = response.strip()
+        return out or None
+    for key in ("episode_video_ref", "video_url"):
+        value = _lookup(response, key)
+        if value:
+            out = str(value).strip()
+            if out:
+                return out
+    artifact_manifest = _lookup(response, "artifact_manifest")
+    if isinstance(artifact_manifest, dict):
+        value = artifact_manifest.get("public_url")
+        if value:
+            out = str(value).strip()
+            if out:
+                return out
+    return None
+
+
 def get_rewards(
     self,
-    expected: float,
-    responses: typing.List[typing.Optional[float]],
+    expected: typing.Optional[float] = None,
+    responses: typing.Optional[typing.List[typing.Any]] = None,
 ) -> np.ndarray:
     """
-    Winner-take-all (split ties): highest reward to miner(s) with smallest |response - expected|.
+    Reward adapter for the staged VLA demo -> robokitchen chain shim migration.
+
+    Preferred path:
+    - validator sets explicit per-response `score`;
+    - rewards are proportional to the non-negative score mass.
+
+    Compatibility path:
+    - reward non-empty video refs almost uniformly with deterministic jitter.
     """
+    responses = list(responses or [])
     n = len(responses)
-    errs = np.full(n, np.inf, dtype=np.float64)
-    for i, r in enumerate(responses):
-        if r is None:
+    if n == 0:
+        return np.array([], dtype=np.float32)
+
+    explicit_scores = np.full(n, np.nan, dtype=np.float64)
+    has_explicit_scores = False
+    for i, response in enumerate(responses):
+        score = _extract_explicit_score(response)
+        if score is None or not np.isfinite(score):
             continue
-        try:
-            errs[i] = abs(float(r) - float(expected))
-        except (TypeError, ValueError):
-            errs[i] = np.inf
+        explicit_scores[i] = max(0.0, float(score))
+        has_explicit_scores = True
 
-    finite = errs[np.isfinite(errs)]
-    if finite.size == 0:
-        bt.logging.warning("No valid miner responses for reward.")
+    if has_explicit_scores:
+        total = float(np.nansum(explicit_scores))
+        if total <= 0.0:
+            bt.logging.warning("Kitchen shim scores were present but non-positive.")
+            return np.zeros(n, dtype=np.float32)
+        return np.nan_to_num(explicit_scores / total, nan=0.0).astype(np.float32)
+
+    weights = np.zeros(n, dtype=np.float64)
+    for i, response in enumerate(responses):
+        video_ref = _extract_video_ref(response)
+        if not video_ref:
+            continue
+        digest = hashlib.sha256(video_ref.encode("utf-8")).hexdigest()
+        jitter = (int(digest[:8], 16) % 401) / 10000.0
+        weights[i] = 1.0 + jitter
+
+    total = float(np.sum(weights))
+    if total <= 0.0:
+        bt.logging.warning("No valid miner artifact for reward.")
         return np.zeros(n, dtype=np.float32)
-
-    best = float(np.min(finite))
-    winners = np.isfinite(errs) & (errs <= best + 1e-6)
-    k = int(np.sum(winners))
-    out = np.zeros(n, dtype=np.float32)
-    if k > 0:
-        out[winners] = 1.0 / k
-    return out
+    return (weights / total).astype(np.float32)

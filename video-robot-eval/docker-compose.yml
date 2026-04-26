@@ -1,0 +1,8 @@
+services:
+  eval:
+    build: .
+    env_file:
+      - .env
+    volumes:
+      - ./work:/app/work
+    command: ["python", "-m", "app.main", "--work-dir", "/app/work"]

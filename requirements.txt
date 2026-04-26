@@ -8,6 +8,8 @@
 bittensor[cli]==9.7.0
 # Pin CLI to the same minor as the SDK; bittensor[cli] only requires bittensor-cli>=9.0.2 and would otherwise float to latest.
 bittensor-cli==9.7.0
+async-substrate-interface==1.6.4
 # Pin: bittensor 9.7.x calls get_encrypted_commit without `hotkey`; newer bittensor-drand (1.x)
 # requires hotkey and breaks set_weights / commit-reveal. Match upstream SDK’s paired version.
 bittensor-drand==0.5.0
+httpx>=0.27.0

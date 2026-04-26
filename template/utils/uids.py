@@ -23,7 +23,7 @@ def check_uid_availability(
     vpermit_tao_limit: int,
     validator_axon_ports: FrozenSet[int],
 ) -> bool:
-    """Serving axons only; optional exclusion of validator axon ports (Docker 9101/9102)."""
+    """Serving axons only; optional exclusion of validator axon ports."""
     if not metagraph.axons[uid].is_serving:
         return False
     if validator_axon_ports:
@@ -69,9 +69,7 @@ def get_random_uids(self, k: int, exclude: List[int] = None) -> np.ndarray:
             avail_uids.append(uid)
             if uid_is_not_excluded:
                 candidate_uids.append(uid)
-    # If k is larger than the number of available uids, set k to the number of available uids.
     k = min(k, len(avail_uids))
-    # Check if candidate_uids contain enough for querying, if not grab all avaliable uids
     available_uids = candidate_uids
     if len(candidate_uids) < k:
         available_uids += random.sample(
