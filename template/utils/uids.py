@@ -23,7 +23,7 @@ def check_uid_availability(
     vpermit_tao_limit: int,
     validator_axon_ports: FrozenSet[int],
 ) -> bool:
-    """Serving axons only; optional exclusion of validator axon ports (Docker 9121/9122)."""
+    """Serving axons only; optional exclusion of validator axon ports."""
     if not metagraph.axons[uid].is_serving:
         return False
     if validator_axon_ports:

@@ -278,11 +278,12 @@ def add_validator_args(cls, parser):
         "--neuron.validator_axon_ports",
         type=str,
         help=(
-            "Comma-separated axon ports to skip when sampling miners (Docker validators: 9121,9122). "
-            "Non-empty: only serving UIDs whose port is not listed are queried. "
-            "Empty: classic vpermit_tao_limit-only rule."
+            "Comma-separated axon ports never treated as miners "
+            "(Docker validators: 9101,9102,9121,9122). "
+            "When non-empty, only serving UIDs whose axon port is not in this set are sampled. "
+            "Empty string restores classic vpermit_tao_limit-only filtering."
         ),
-        default="9121,9122",
+        default="9101,9102,9121,9122",
     )
 
     parser.add_argument(
