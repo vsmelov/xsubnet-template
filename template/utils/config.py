@@ -169,6 +169,41 @@ def add_miner_args(cls, parser):
         help="Wandb entity to log to.",
     )
 
+    parser.add_argument(
+        "--neuron.runtime_base_url",
+        type=str,
+        help="Internal kitchen runtime base URL used by chain-facing miner/validator shims.",
+        default=os.environ.get("KONNEX_VLA_RUNTIME_BASE_URL", ""),
+    )
+
+    parser.add_argument(
+        "--neuron.runtime_timeout",
+        type=float,
+        help="Timeout in seconds for internal kitchen runtime HTTP calls.",
+        default=float(os.environ.get("KONNEX_VLA_RUNTIME_TIMEOUT", "15")),
+    )
+
+    parser.add_argument(
+        "--neuron.control_plane_url",
+        type=str,
+        help="Control-plane base URL for publication journal emission.",
+        default=os.environ.get("KONNEX_CONTROL_PLANE_URL", ""),
+    )
+
+    parser.add_argument(
+        "--neuron.control_plane_token",
+        type=str,
+        help="Bearer token for control-plane internal routes.",
+        default=os.environ.get("KONNEX_INTERNAL_API_TOKEN", ""),
+    )
+
+    parser.add_argument(
+        "--neuron.control_plane_subnet",
+        type=str,
+        help="Control-plane subnet slug for publication journal emission.",
+        default=os.environ.get("KONNEX_CONTROL_PLANE_SUBNET", "robokitchen-vla"),
+    )
+
 
 def add_validator_args(cls, parser):
     """Add validator specific arguments to the parser."""
@@ -262,6 +297,20 @@ def add_validator_args(cls, parser):
         type=str,
         help="The name of the project where you are sending the new run.",
         default="opentensor-dev",
+    )
+
+    parser.add_argument(
+        "--neuron.runtime_base_url",
+        type=str,
+        help="Internal kitchen runtime base URL used by chain-facing miner/validator shims.",
+        default=os.environ.get("KONNEX_VLA_RUNTIME_BASE_URL", ""),
+    )
+
+    parser.add_argument(
+        "--neuron.runtime_timeout",
+        type=float,
+        help="Timeout in seconds for internal kitchen runtime HTTP calls.",
+        default=float(os.environ.get("KONNEX_VLA_RUNTIME_TIMEOUT", "15")),
     )
 
 

@@ -19,11 +19,14 @@
 
 
 import copy
+import json
 import numpy as np
 import asyncio
 import argparse
 import threading
 import bittensor as bt
+import urllib.error
+import urllib.request
 
 from typing import List, Union
 from traceback import print_exception
@@ -276,8 +279,48 @@ class BaseValidatorNeuron(BaseNeuron):
         )
         if result is True:
             bt.logging.info("set_weights on chain successfully!")
+            self._emit_publication_journal(uint_uids, uint_weights)
         else:
             bt.logging.error("set_weights failed", msg)
+
+    def _emit_publication_journal(self, uids, weights):
+        base_url = str(getattr(self.config.neuron, "control_plane_url", "") or "").rstrip("/")
+        token = str(getattr(self.config.neuron, "control_plane_token", "") or "")
+        subnet = str(getattr(self.config.neuron, "control_plane_subnet", "") or "robokitchen-vla")
+        if not base_url or not token:
+            bt.logging.warning("Skipping control-plane publication emission: URL/token not configured.")
+            return
+        try:
+            uids_list = [int(x) for x in list(uids)]
+            raw_weights = [float(x) for x in list(weights)]
+        except TypeError:
+            uids_list = []
+            raw_weights = []
+        payload = {
+            "subnet": subnet,
+            "netuid": int(self.config.netuid),
+            "validator_hotkey": self.wallet.hotkey.ss58_address,
+            "tempo_id": int(getattr(self, "step", 0)),
+            "uids": uids_list,
+            "weights": raw_weights,
+            "extrinsic_hash": f"set_weights:{self.config.netuid}:{getattr(self, 'step', 0)}",
+            "publication_status": "pending",
+            "transcript_refs": [f"{subnet}:validator-step:{getattr(self, 'step', 0)}"],
+        }
+        req = urllib.request.Request(
+            f"{base_url}/api/internal/publications",
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {token}",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                bt.logging.info(f"control-plane publication emitted: status={resp.status}")
+        except (urllib.error.URLError, TimeoutError) as exc:
+            bt.logging.warning(f"control-plane publication emission failed: {exc}")
 
     def resync_metagraph(self):
         """Resyncs the metagraph and updates the hotkeys and moving averages based on the new metagraph."""

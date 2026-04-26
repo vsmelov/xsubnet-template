@@ -3,38 +3,106 @@
 # Copyright © 2023 <your name>
 
 import typing
+import hashlib
 
 import numpy as np
 import bittensor as bt
 
 
+def _coerce_float(value: typing.Any) -> typing.Optional[float]:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _lookup(obj: typing.Any, key: str) -> typing.Any:
+    if obj is None:
+        return None
+    if isinstance(obj, dict):
+        return obj.get(key)
+    return getattr(obj, key, None)
+
+
+def _extract_explicit_score(response: typing.Any) -> typing.Optional[float]:
+    direct = _coerce_float(_lookup(response, "score"))
+    if direct is not None:
+        return direct
+    scoring = _lookup(response, "scoring")
+    return _coerce_float(_lookup(scoring, "score"))
+
+
+def _extract_video_ref(response: typing.Any) -> typing.Optional[str]:
+    if response is None:
+        return None
+    if isinstance(response, str):
+        out = response.strip()
+        return out or None
+    for key in ("episode_video_ref", "video_url"):
+        value = _lookup(response, key)
+        if value:
+            out = str(value).strip()
+            if out:
+                return out
+    artifact_manifest = _lookup(response, "artifact_manifest")
+    if isinstance(artifact_manifest, dict):
+        value = artifact_manifest.get("public_url")
+        if value:
+            out = str(value).strip()
+            if out:
+                return out
+    return None
+
+
 def get_rewards(
     self,
-    responses: typing.List[typing.Optional[str]],
+    expected: typing.Optional[float] = None,
+    responses: typing.Optional[typing.List[typing.Any]] = None,
 ) -> np.ndarray:
     """
-    Nearly uniform random weights: base 1/n plus small jitter, then normalize.
-    Miners with no video_url (None / empty) get 0.
+    Reward adapter for the staged VLA demo -> robokitchen chain shim migration.
+
+    Preferred path:
+    - validator sets explicit per-response `score`;
+    - rewards are proportional to the non-negative score mass.
+
+    Compatibility path:
+    - reward non-empty video refs almost uniformly with deterministic jitter.
     """
+    responses = list(responses or [])
     n = len(responses)
     if n == 0:
         return np.array([], dtype=np.float32)
 
-    valid = np.array(
-        [r is not None and len(str(r).strip()) > 0 for r in responses],
-        dtype=bool,
-    )
-    if not valid.any():
-        bt.logging.warning("No valid miner video_url for reward.")
-        return np.zeros(n, dtype=np.float32)
+    explicit_scores = np.full(n, np.nan, dtype=np.float64)
+    has_explicit_scores = False
+    for i, response in enumerate(responses):
+        score = _extract_explicit_score(response)
+        if score is None or not np.isfinite(score):
+            continue
+        explicit_scores[i] = max(0.0, float(score))
+        has_explicit_scores = True
 
-    rng = np.random.default_rng()
-    w = np.ones(n, dtype=np.float64) / float(n)
-    jitter = rng.uniform(-0.04, 0.04, size=n)
-    w = w + jitter
-    w = np.maximum(w, 1e-6)
-    w[~valid] = 0.0
-    s = float(w.sum())
-    if s <= 0:
+    if has_explicit_scores:
+        total = float(np.nansum(explicit_scores))
+        if total <= 0.0:
+            bt.logging.warning("Kitchen shim scores were present but non-positive.")
+            return np.zeros(n, dtype=np.float32)
+        return np.nan_to_num(explicit_scores / total, nan=0.0).astype(np.float32)
+
+    weights = np.zeros(n, dtype=np.float64)
+    for i, response in enumerate(responses):
+        video_ref = _extract_video_ref(response)
+        if not video_ref:
+            continue
+        digest = hashlib.sha256(video_ref.encode("utf-8")).hexdigest()
+        jitter = (int(digest[:8], 16) % 401) / 10000.0
+        weights[i] = 1.0 + jitter
+
+    total = float(np.sum(weights))
+    if total <= 0.0:
+        bt.logging.warning("No valid miner artifact for reward.")
         return np.zeros(n, dtype=np.float32)
-    return (w / s).astype(np.float32)
+    return (weights / total).astype(np.float32)

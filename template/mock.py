@@ -4,7 +4,7 @@ import random
 import bittensor as bt
 from typing import List
 
-from template.protocol import STUB_RESULT_VIDEO_URL, is_allowed_task, normalize_task
+from template.protocol import STUB_RESULT_VIDEO_URL, normalize_task, normalize_task_type
 
 
 class MockWallet:
@@ -20,7 +20,9 @@ class MockSubtensor(bt.MockSubtensor):
     def __init__(self, netuid, n=16, wallet=None, network="mock"):
         super().__init__(network=network)
 
-        if not self.subnet_exists(netuid):
+        # SDK 9.7 MockSubtensor.subnet_exists() can return a truthy query wrapper
+        # before the in-memory NetworksAdded map is initialized for this netuid.
+        if netuid not in self.chain_state["SubtensorModule"]["NetworksAdded"]:
             self.create_subnet(netuid)
 
         if wallet is not None:
@@ -83,15 +85,27 @@ class MockDendrite(bt.Dendrite):
                 if process_time < timeout:
                     s.dendrite.process_time = str(time.time() - start_time)
                     task = normalize_task(getattr(s, "task", None))
-                    if is_allowed_task(task):
+                    task_type = normalize_task_type(getattr(s, "task_type", None), task)
+                    if task_type:
                         s.video_url = STUB_RESULT_VIDEO_URL
+                        s.episode_video_ref = STUB_RESULT_VIDEO_URL
+                        s.artifact_manifest = {
+                            "artifact_id": f"kitchen-mock-{i}",
+                            "artifact_type": "episode_video",
+                            "public_url": STUB_RESULT_VIDEO_URL,
+                            "metadata": {"task_type": task_type},
+                        }
                     else:
                         s.video_url = None
+                        s.episode_video_ref = None
+                        s.artifact_manifest = None
                     s.dendrite.status_code = 200
                     s.dendrite.status_message = "OK"
                     synapse.dendrite.process_time = str(process_time)
                 else:
                     s.video_url = None
+                    s.episode_video_ref = None
+                    s.artifact_manifest = None
                     s.dendrite.status_code = 408
                     s.dendrite.status_message = "Timeout"
                     synapse.dendrite.process_time = str(timeout)
