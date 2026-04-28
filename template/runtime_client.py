@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import urllib.error
 import urllib.request
 from typing import Any
@@ -24,10 +25,19 @@ def runtime_timeout(config: Any) -> float:
 
 
 def post_json(base_url: str, path: str, payload: dict[str, Any], timeout_s: float) -> dict[str, Any]:
+    headers = {"Content-Type": "application/json"}
+    token = (
+        os.environ.get("KONNEX_KITCHEN_INTERNAL_TOKEN")
+        or os.environ.get("KONNEX_VLA_INTERNAL_TOKEN")
+        or os.environ.get("KONNEX_INTERNAL_API_TOKEN")
+        or ""
+    ).strip()
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     req = urllib.request.Request(
         f"{base_url}{path}",
         data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"},
+        headers=headers,
         method="POST",
     )
     with urllib.request.urlopen(req, timeout=timeout_s) as resp:
